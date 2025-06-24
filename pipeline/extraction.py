@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from typing import List, Dict
+from typing import List
 
 from duckdb import IOException
 from jinja2 import Template
@@ -12,6 +12,7 @@ from database_manager import (
     connect_to_database,
     close_database_connection,
     execute_query,
+    read_query,
 )
 
 def read_location_ids(file_path: str) -> List[int]:
@@ -50,9 +51,37 @@ def compile_data_file_query(
     return extract_query
 
 def extract_data(args):
-    pass
+    location_ids = read_location_ids(args.locations_file_path)
+    data_file_path_template = "locationid={{location_id}}/year={{year}}/month={{month}}/*"
+    data_file_paths = compile_data_file_paths(
+        data_file_path_template=data_file_path_template,
+        location_ids=location_ids,
+        start_date=args.start_date,
+        end_date=args.end_date
+    )
+
+    extract_query_template = read_query(path=args.extract_query_template_path)
+
+    con = connect_to_database(path=args.database_path)
+
+    for data_file_path in data_file_paths:
+        logging.info(f"Extracting data from {data_file_path}")
+        query = compile_data_file_query(
+            base_path=args.source_base_path,
+            data_file_path=data_file_path,
+            extract_query_template=extract_query_template
+        )
+        try:
+         execute_query(con, query)
+         logging.info(f"Successfully executed query for {data_file_path}")
+        except IOException as e:
+            logging.warning(f"Could not find data from {data_file_path}: {e}")
+    
+    close_database_connection(con)
+
 
 def main():
+    logging.getLogger().setLevel(logging.INFO)
     parser = argparse.ArgumentParser(description="CLI for ETL Extraction")
 
     parser.add_argument(
